@@ -10,7 +10,7 @@ packages<-c("ggmap","leaflet","ggplot2", "adehabitatHR","data.table","ggfortify"
 sapply(packages, require, character.only=T)
 
 library(readr)
-American_mink_Neovison_vison_space_use_in_Illinois_data_from_Ahlers_et_al_2015_ <- read_csv("American mink (Neovison vison) space use in Illinois (data from Ahlers et al. 2015) .csv")
+American_mink_Neovison_vison_space_use_in_Illinois_data_from_Ahlers_et_al_2015_ <- read_csv("American mink (Neovison vison) space use in Illinois (data from Ahlers et al. 2015).csv")
 mink <- American_mink_Neovison_vison_space_use_in_Illinois_data_from_Ahlers_et_al_2015_
 colnames(mink) <- c("event.id","visible", "timestamp","location.long","location.lat","location.error.numerical","sensor.type","individual.taxon","tag.local.identifier","individual.local.identifier","study.name","utm.easting","utm.northing","utm.zone")
 
@@ -30,6 +30,30 @@ ggplotly(qaqc_plot)
 ```
 
 
+```{r}
+utm_points <- cbind(Mink$utm.easting, Mink$utm.northing)
+utm_locations <- SpatialPoints(utm_points, 
+                 proj4string=CRS("+proj=utm +zone=16 +datum=WGS84"))
+proj_lat.lon <- as.data.frame(spTransform(
+                utm_locations, CRS("+proj=longlat +datum=WGS84")))
+colnames(proj_lat.lon) <- c("x","y")
+raster <- openmap(c(max(proj_lat.lon$y)+0.01, min(proj_lat.lon$x)-0.01), 
+                  c(min(proj_lat.lon$y)-0.01, max(proj_lat.lon$x)+0.01), 
+                  type = "bing")
+raster_utm <- openproj(raster, 
+              projection = "+proj=utm +zone=16 +ellps=WGS84 +units=m +no_defs")
+
+autoplot(raster_utm, expand = TRUE) + theme_bw() +
+  theme(legend.position="bottom") +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+  geom_point(data=Mink, aes(utm.easting,utm.northing,
+             color=individual.local.identifier), size = 3, alpha = 0.8) +
+  theme(axis.title = element_text(face="bold")) + labs(x="Easting",
+        y="Northing") + guides(color=guide_legend("Identifier"))
+```
+
+
+
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 lapply(split(Mink, Mink$individual.local.identifier), 
        function(x)write.csv(x, file = paste(x$individual.local.identifier[1],".csv"), row.names = FALSE))
@@ -38,21 +62,6 @@ lapply(split(Mink, Mink$individual.local.identifier),
 files <- c("./1 .csv", "./2 .csv")
 ```
 
-
-```{r echo=FALSE, message=FALSE, warning=FALSE}
-# create a background map using leaflet
-
-colors <- c("brown","yellow","darkgreen")
-
-leaflet() %>% 
-  addTiles() %>%
-  addCircleMarkers(Mink$location.long,
-                   Mink$location.lat,
-                   weight = 1,
-                   color = "blue",
-                   fillColor = "blue",
-                   fillOpacity = 0.7)
-```
 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
@@ -70,7 +79,7 @@ mcp_raster <- function(filename){
   mcp.points <- cbind((data.frame(xy)),data$individual.local.identifier)
   colnames(mcp.points) <- c("x","y", "identifier")
   mcp.poly <- fortify(mcp.out, region = "id")
-  mcp.plot <- ggplot() + theme_bw() + theme(legend.position="none") +
+  mcp.plot <- autoplot(raster_utm, expand = TRUE) + theme_bw() + theme(legend.position="none") +
     theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
     geom_polygon(data=mcp.poly, aes(x=mcp.poly$long, y=mcp.poly$lat), alpha=0.8) +
     geom_point(data=mcp.points, aes(x=x, y=y)) + 
@@ -109,7 +118,7 @@ kde_raster <- function(filename){
   # class though so try that first.
   # or. . . you can also always just use the orignal code and run it in the computer lab so 
   # that open street map will work.
-  kde.plot <- ggplot() +
+  kde.plot <- autoplot(raster_utm, expand = TRUE) +
     theme_bw() + theme(legend.position="none") +
     theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
     geom_polygon(data=kde.poly95, aes(x=kde.poly95$long, y=kde.poly95$lat, group=group, fill="green"), alpha = 0.8) +
