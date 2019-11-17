@@ -1,0 +1,144 @@
+---
+title: "Mink Movement"
+output: html_notebook
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# import packages and upload data-set
+
+packages<-c("ggmap","leaflet","ggplot2", "adehabitatHR","data.table","ggfortify","grid","move","moveVis","OpenStreetMap","pbapply","plotly","rgdal","sp","tidyverse","viridis","ggspatial")
+sapply(packages, require, character.only=T)
+
+library(readr)
+American_mink_Neovison_vison_space_use_in_Illinois_data_from_Ahlers_et_al_2015_ <- read_csv("American mink (Neovison vison) space use in Illinois (data from Ahlers et al. 2015) .csv")
+mink <- American_mink_Neovison_vison_space_use_in_Illinois_data_from_Ahlers_et_al_2015_
+colnames(mink) <- c("event.id","visible", "timestamp","location.long","location.lat","location.error.numerical","sensor.type","individual.taxon","tag.local.identifier","individual.local.identifier","study.name","utm.easting","utm.northing","utm.zone")
+
+Mink <- mink %>% slice(1:196)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# make a basic plot of the importata data that is plotted on an 
+# interactive map that allows examination of data within each data point
+
+qaqc_plot <- ggplot() + geom_point(data=Mink, aes(Mink$location.long,Mink$location.lat, color=Mink$individual.local.identifier))  +
+  labs(x="Longitude", y="Latitude") +
+  guides(color=guide_legend("individual.local.identifier"))
+
+ggplotly(qaqc_plot)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+lapply(split(Mink, Mink$individual.local.identifier), 
+       function(x)write.csv(x, file = paste(x$individual.local.identifier[1],".csv"), row.names = FALSE))
+
+#files <- list.files(path = ".", pattern = "[1-2]", full.names = TRUE)
+files <- c("./1 .csv", "./2 .csv")
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# create a background map using leaflet
+
+colors <- c("brown","yellow","darkgreen")
+
+leaflet() %>% 
+  addTiles() %>%
+  addCircleMarkers(Mink$location.long,
+                   Mink$location.lat,
+                   weight = 1,
+                   color = "blue",
+                   fillColor = "blue",
+                   fillOpacity = 0.7)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Create a function that can easily be applied to all of the files created
+# to generate a minimum convex polygon 
+
+mcp_raster <- function(filename){
+  data <- read.csv(file = filename)
+  x <- as.data.frame(data$utm.easting)
+  y <- as.data.frame(data$utm.northing)
+  xy <- c(x,y)
+  data.proj <- SpatialPointsDataFrame(xy,data, proj4string = CRS("+proj=utm +zone=16 +ellps=WGS84 +units=m +no_defs"))
+  xy <- SpatialPoints(data.proj@coords)
+  mcp.out <- mcp(xy, percent=100, unout="ha")
+  mcp.points <- cbind((data.frame(xy)),data$individual.local.identifier)
+  colnames(mcp.points) <- c("x","y", "identifier")
+  mcp.poly <- fortify(mcp.out, region = "id")
+  mcp.plot <- ggplot() + theme_bw() + theme(legend.position="none") +
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+    geom_polygon(data=mcp.poly, aes(x=mcp.poly$long, y=mcp.poly$lat), alpha=0.8) +
+    geom_point(data=mcp.points, aes(x=x, y=y)) + 
+    labs(x="Easting (m)", y="Northing (m)", title=mcp.points$identifier) +
+    theme(legend.position="none", plot.title = element_text(face = "bold"))
+  mcp.plot
+}
+
+pblapply(files, mcp_raster)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Create a function that can easily be applied to all of the files created
+# to generate a kernal density map 
+
+kde_raster <- function(filename){
+  data <- read.csv(file = filename)
+  x <- as.data.frame(data$utm.easting)
+  y <- as.data.frame(data$utm.northing)
+  xy <- c(x,y)
+  data.proj <- SpatialPointsDataFrame(xy,data, proj4string = CRS("+proj=utm +zone=16 +ellps=WGS84 +units=m +no_defs"))
+  xy <- SpatialPoints(data.proj@coords)
+  kde<-kernelUD(xy, h="href", kern="bivnorm", grid=100)
+  ver95 <- getverticeshr(kde, 95)
+  ver75 <- getverticeshr(kde, 75)
+  ver50 <- getverticeshr(kde, 50)
+  kde.points <- cbind((data.frame(data.proj@coords)),data$individual.local.identifier)
+  colnames(kde.points) <- c("x","y","identifier")
+  kde.poly95 <- fortify(ver95, region = "id")
+  kde.poly75 <- fortify(ver75, region = "id")
+  kde.poly50 <- fortify(ver50, region = "id")
+  # use get_stamenmap to create an object prior to this function without using ggmap. 
+  # then follow the instructions on the github page to convert the coordinated from lat/long 
+  # to UTM. You will need to figure out what class the "raster" is, it may just be a raster 
+  # class though so try that first.
+  # or. . . you can also always just use the orignal code and run it in the computer lab so 
+  # that open street map will work.
+  kde.plot <- ggplot() +
+    theme_bw() + theme(legend.position="none") +
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+    geom_polygon(data=kde.poly95, aes(x=kde.poly95$long, y=kde.poly95$lat, group=group, fill="green"), alpha = 0.8) +
+    geom_polygon(data=kde.poly75, aes(x=kde.poly75$long, y=kde.poly75$lat, group=group, fill="blue"), alpha = 0.8) +
+    geom_polygon(data=kde.poly50, aes(x=kde.poly50$long, y=kde.poly50$lat, group=group, fill="red"), alpha = 0.8) +
+    geom_point(data=kde.points, aes(x=x, y=y)) +
+    labs(x="Easting (m)", y="Northing (m)", title=kde.points$identifier) +
+    theme(legend.position="none", plot.title = element_text(face = "bold"))
+  kde.plot
+}
+
+pblapply(files, kde_raster)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
